@@ -1,0 +1,213 @@
+import rough from "roughjs/bin/rough";
+import { ARROW_LENGTH, TOOL_ITEMS } from "../constants";
+import { getArrowHeadsCoordinates, isPointCloseToLine } from "./math";
+import getStroke from "perfect-freehand";
+
+const gen = rough.generator();
+
+const getElementOptions = (element) => {
+  const options = {
+    seed: element.id + 1,
+    fillStyle: "solid",
+  };
+  if (element.stroke) {
+    options.stroke = element.stroke;
+  }
+  if (element.fill) {
+    options.fill = element.fill;
+  }
+  if (element.size) {
+    options.strokeWidth = element.size;
+  }
+  return options;
+};
+
+export const createElement = (
+  id,
+  x1,
+  y1,
+  x2,
+  y2,
+  { type, stroke, fill, size }
+) => {
+  const element = { id, x1, y1, x2, y2, type, stroke, fill, size };
+
+  let options = getElementOptions(element);
+
+  switch (type) {
+    case TOOL_ITEMS.BRUSH:
+      const brushElement = {
+        id,
+        points: [{ x: x1, y: y1 }],
+        path: new Path2D(getSvgPathFromStroke(getStroke([{ x: x1, y: y1 }]))),
+        type,
+        stroke,
+      };
+      return brushElement;
+    case TOOL_ITEMS.LINE:
+      element.roughEle = gen.line(x1, y1, x2, y2, options);
+      return element;
+    case TOOL_ITEMS.RECTANGLE:
+      element.roughEle = gen.rectangle(x1, y1, x2 - x1, y2 - y1, options);
+      return element;
+    case TOOL_ITEMS.CIRCLE:
+      const cx = (x1 + x2) / 2,
+        cy = (y1 + y2) / 2;
+      const width = x2 - x1,
+        height = y2 - y1;
+      element.roughEle = gen.ellipse(cx, cy, width, height, options);
+      return element;
+    case TOOL_ITEMS.ARROW:
+      const { x3, y3, x4, y4 } = getArrowHeadsCoordinates(
+        x1,
+        y1,
+        x2,
+        y2,
+        ARROW_LENGTH
+      );
+      const points = [
+        [x1, y1],
+        [x2, y2],
+        [x3, y3],
+        [x2, y2],
+        [x4, y4],
+      ];
+      element.roughEle = gen.linearPath(points, options);
+      return element;
+    case TOOL_ITEMS.TEXT:
+      element.text = "";
+      return element;
+    default:
+      throw new Error("Type not recognized");
+  }
+};
+
+export const isPointNearElement = (element, pointX, pointY) => {
+  const { x1, y1, x2, y2, type } = element;
+  const context = document.getElementById("canvas").getContext("2d");
+
+  switch (type) {
+    case TOOL_ITEMS.LINE:
+    case TOOL_ITEMS.ARROW:
+      return isPointCloseToLine(x1, y1, x2, y2, pointX, pointY);
+    case TOOL_ITEMS.RECTANGLE:
+    case TOOL_ITEMS.CIRCLE:
+      return (
+        isPointCloseToLine(x1, y1, x2, y1, pointX, pointY) ||
+        isPointCloseToLine(x1, y1, x1, y2, pointX, pointY) ||
+        isPointCloseToLine(x1, y2, x2, y2, pointX, pointY) ||
+        isPointCloseToLine(x2, y1, x2, y2, pointX, pointY)
+      );
+    case TOOL_ITEMS.BRUSH:
+      return context.isPointInPath(element.path, pointX, pointY);
+    case TOOL_ITEMS.TEXT:
+      context.font = `${element.size}px Caveat`;
+      context.fillStyle = element.stroke;
+      const textWidth = context.measureText(element.text).width;
+      const textHeight = parseInt(element.size);
+      context.restore();
+      return (
+        isPointCloseToLine(x1, y1, x1 + textWidth, y1, pointX, pointY) ||
+        isPointCloseToLine(
+          x1 + textWidth,
+          y1,
+          x1 + textWidth,
+          y1 + textHeight,
+          pointX,
+          pointY
+        ) ||
+        isPointCloseToLine(
+          x1 + textWidth,
+          y1 + textHeight,
+          x1,
+          y1 + textHeight,
+          pointX,
+          pointY
+        ) ||
+        isPointCloseToLine(x1, y1 + textHeight, x1, y1, pointX, pointY)
+      );
+    default:
+      throw new Error("Type not recognized");
+  }
+};
+
+export const restoreElement = (element) => {
+  const restored = { ...element };
+  const options = getElementOptions(restored);
+
+  switch (restored.type) {
+    case TOOL_ITEMS.LINE:
+      restored.roughEle = gen.line(
+        restored.x1,
+        restored.y1,
+        restored.x2,
+        restored.y2,
+        options
+      );
+      break;
+    case TOOL_ITEMS.RECTANGLE:
+      restored.roughEle = gen.rectangle(
+        restored.x1,
+        restored.y1,
+        restored.x2 - restored.x1,
+        restored.y2 - restored.y1,
+        options
+      );
+      break;
+    case TOOL_ITEMS.CIRCLE:
+      const cx = (restored.x1 + restored.x2) / 2;
+      const cy = (restored.y1 + restored.y2) / 2;
+      const width = restored.x2 - restored.x1;
+      const height = restored.y2 - restored.y1;
+      restored.roughEle = gen.ellipse(cx, cy, width, height, options);
+      break;
+    case TOOL_ITEMS.ARROW:
+      const { x3, y3, x4, y4 } = getArrowHeadsCoordinates(
+        restored.x1,
+        restored.y1,
+        restored.x2,
+        restored.y2,
+        ARROW_LENGTH
+      );
+      const points = [
+        [restored.x1, restored.y1],
+        [restored.x2, restored.y2],
+        [x3, y3],
+        [restored.x2, restored.y2],
+        [x4, y4],
+      ];
+      restored.roughEle = gen.linearPath(points, options);
+      break;
+    case TOOL_ITEMS.BRUSH:
+      restored.path = new Path2D(
+        getSvgPathFromStroke(getStroke(restored.points || []))
+      );
+      break;
+    case TOOL_ITEMS.TEXT:
+      break;
+    default:
+      break;
+  }
+
+  return restored;
+};
+
+export const restoreElements = (elements = []) => {
+  return elements.map((element) => restoreElement(element));
+};
+
+export const getSvgPathFromStroke = (stroke) => {
+  if (!stroke.length) return "";
+
+  const d = stroke.reduce(
+    (acc, [x0, y0], i, arr) => {
+      const [x1, y1] = arr[(i + 1) % arr.length];
+      acc.push(x0, y0, (x0 + x1) / 2, (y0 + y1) / 2);
+      return acc;
+    },
+    ["M", ...stroke[0], "Q"]
+  );
+
+  d.push("Z");
+  return d.join(" ");
+};
